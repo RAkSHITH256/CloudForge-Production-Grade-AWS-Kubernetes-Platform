@@ -1,0 +1,63 @@
+Summary
+
+Project: Production-Style AWS EKS Platform with Terraform and Progressive Delivery
+
+One-liner: A multi-environment Kubernetes platform on AWS, provisioned entirely with Terraform and deployed via GitOps. Canary releases are judged by Prometheus metrics and roll back automatically when they fail.
+
+Stack: Terraform, AWS (VPC, EKS, IAM, S3, DynamoDB, Secrets Manager), GitHub Actions with OIDC, Argo CD, Argo Rollouts, Prometheus/Grafana, External Secrets Operator, Kyverno, tfsec/Checkov, Infracost.
+
+Skills it proves: IaC, cloud networking and IAM, secretless CI, secure secrets handling, progressive delivery, and cost awareness.
+
+Implementation Method
+Phase 1: Foundation (Week 1)
+Create the repo structure:
+platform/
+├── terraform/
+│   ├── modules/{vpc,eks,iam}/
+│   ├── envs/{dev,prod}/
+│   └── bootstrap/        # S3 + DynamoDB for state
+├── gitops/
+│   ├── apps/             # Argo CD app-of-apps
+│   └── workloads/        # sample app + rollout manifests
+└── .github/workflows/
+Write bootstrap/ to create the S3 bucket (versioned, encrypted) and DynamoDB lock table. Apply it once with local state.
+Configure the S3 backend in envs/dev.
+Phase 2: Infrastructure with Terraform (Week 1-2)
+VPC module: 2 AZs, public and private subnets, and a single NAT gateway for dev to save cost. Add the subnet tags EKS needs for load balancers.
+EKS module: a managed node group (e.g. 2x t3.medium or spot), the OIDC provider enabled, and control plane logging on.
+IAM module: roles for IRSA (load balancer controller, External Secrets).
+Wire both environments through the same modules, with only variables (sizes, CIDRs) differing.
+Run terraform plan, then apply, then kubectl get nodes to verify.
+Phase 3: Cluster Add-ons (Week 2)
+Install the AWS Load Balancer Controller (Helm, with an IRSA role).
+Install Argo CD and point it at your gitops/apps folder (app-of-apps pattern).
+Let Argo CD install the rest declaratively: kube-prometheus-stack, External Secrets Operator, Argo Rollouts, and Kyverno with your existing policies from the supply-chain project.
+Phase 4: Secrets Handling (Week 3)
+Store a sample secret in AWS Secrets Manager.
+Create a ClusterSecretStore and an ExternalSecret that syncs it into the cluster using IRSA.
+Confirm no secret values appear anywhere in Git.
+Phase 5: Progressive Delivery (Week 3)
+Containerize a small sample app (reuse your Python one) that exposes request and error metrics.
+Convert its Deployment into an Argo Rollout with a canary strategy (e.g. 20%, 50%, 100% with pauses).
+Add an AnalysisTemplate that queries Prometheus for success rate or p95 latency.
+Test two cases:
+A good release, which should promote fully.
+A deliberately broken release (return 500s), which should abort and roll back automatically.
+Screenshot or record both runs. This is your demo.
+Phase 6: CI/CD Pipelines (Week 4)
+Infra pipeline:
+On PR: fmt, validate, tflint, checkov/tfsec, then plan posted as a PR comment, plus an Infracost cost diff.
+On merge to main: apply for dev. Prod requires manual approval through a GitHub Environment.
+Authenticate with GitHub OIDC and an IAM role, so there are no stored AWS keys.
+App pipeline: build, scan (Trivy), push the image, then update the image tag in the GitOps folder so Argo CD rolls it out.
+Phase 7: Polish (Week 4)
+Add an architecture diagram and a README with setup steps, design decisions, and a cost note.
+Build a Grafana dashboard for rollout health.
+Write a teardown script (terraform destroy) and record a 2-3 minute demo video.
+Add a short "what I'd improve" section (Karpenter, multi-region, service mesh).
+Tips
+Cost: build in short sessions and destroy after each one. Use spot nodes and one NAT gateway in dev. Set an AWS Budget alert at a low threshold on day one.
+Order matters: get the VPC and EKS stable before touching add-ons, and commit working states often.
+Troubleshooting: if IRSA fails, the cause is nearly always a mismatch in the role's trust policy (namespace or service account name).
+
+I can write the Terraform VPC and EKS module code or the GitHub Actions OIDC workflow first if you tell me which to start with.
